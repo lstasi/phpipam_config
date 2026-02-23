@@ -223,7 +223,9 @@ The script expects the following environment variables (or a configuration file)
 | `OPNSENSE_HOST` | Hostname / IP of the OPNsense firewall |
 | `OPNSENSE_KEY` | OPNsense API key |
 | `OPNSENSE_SECRET` | OPNsense API secret |
+| `OPNSENSE_VERIFY_SSL` | Verify OPNsense TLS certificate (`true` / `false` / path to CA bundle). Default: `true` |
 | `PHPIPAM_HOST` | Hostname / IP of the phpIPAM instance |
+| `PHPIPAM_SCHEME` | Protocol for phpIPAM (`https` or `http`). Default: `https` |
 | `PHPIPAM_APP_ID` | phpIPAM API App ID |
 | `PHPIPAM_APP_CODE` | phpIPAM API App code (token) |
 | `PHPIPAM_SUBNET_ID` | phpIPAM subnet ID to synchronise hosts into |
