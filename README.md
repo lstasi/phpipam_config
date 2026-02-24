@@ -268,41 +268,97 @@ phpIPAM REST API
 
 ### Prerequisites
 
-- OPNsense API key with at least **read** access to `diagnostics` and `dhcpv4`.
-- phpIPAM API key with **read/write** access.
-- `curl` or `python3` with `requests` available on the machine running the script.
+- **OPNsense API user** with minimum required privileges:
+  - `Diagnostics: Interface: ARP Table` (read-only)
+  - `Services: DHCPv4: Leases` (read-only)
+- **phpIPAM API application** with **Read/Write** permissions
+- Python 3.8+ with the `requests` library installed on the machine running the script:
+  ```bash
+  pip3 install -r requirements.txt
+  ```
 
 ### OPNsense API credentials
 
 In OPNsense:
 
-1. Navigate to **System → Access → Users** and select (or create) an API user.
-2. Click **+ Add API key** and download the `<key>.txt` file which contains:
-   ```
-   key=<API_KEY>
-   secret=<API_SECRET>
-   ```
-3. Assign the user a role that grants read access to `diagnostics` and `dhcpv4`.
+1. **Create a dedicated user** (recommended):
+   - Navigate to **System → Access → Users**
+   - Click **+ Add** to create a new user (e.g., `phpipam_sync`)
+   - Set a strong password (required even though API key will be used)
+   - Leave shell access disabled
+
+2. **Create a custom group with minimum permissions**:
+   - Navigate to **System → Access → Groups**
+   - Click **+ Add** to create a new group (e.g., `PHPIPAM_API`)
+   - Under **Assigned Privileges**, add only these **two** required privileges:
+     - `Diagnostics: Interface: ARP Table` - for fetching the ARP table
+     - `Services: DHCPv4: Leases` - for fetching DHCP lease information
+   - Save the group
+
+3. **Assign the user to the group**:
+   - Go back to **System → Access → Users** and edit the user created in step 1
+   - In the **Group Membership** section, add the user to the `PHPIPAM_API` group
+   - Save
+
+4. **Generate API credentials**:
+   - While still editing the user, scroll to **API keys**
+   - Click **+ Add API key**
+   - Download the generated `<key>.txt` file which contains:
+     ```
+     key=<API_KEY>
+     secret=<API_SECRET>
+     ```
+   - Store these securely - the secret cannot be retrieved later
+
+> **Security note**: These are the **minimum required permissions**. The user has read-only access to only DHCP leases and the ARP table, following the principle of least privilege.
 
 ### phpIPAM API credentials
 
-Use the App ID and App code created in the [phpIPAM Node Configuration](#phpipam-node-configuration) section, or create a dedicated one.
+In phpIPAM:
+
+1. **Enable the API**:
+   - Log in as admin → **Administration → phpIPAM Settings**
+   - Find the **API** section and set it to **Enabled**
+   - Save changes
+
+2. **Create a dedicated API application**:
+   - Navigate to **Administration → API**
+   - Click **Create API key**
+   - Configure the API application:
+     - **App ID**: `opnsense_sync` (or your preferred identifier)
+     - **App permissions**: **Read/Write** (required to create and update address records)
+     - **App security**:
+       - **SSL with App code token** (recommended for production)
+       - or **App code token** (for testing or internal networks)
+     - **Description**: "OPNsense DHCP/ARP sync"
+   - Click **Add**
+   - Copy the generated **App code** - this is your `PHPIPAM_APP_CODE`
+
+3. **Note the required API permissions**:
+   - The sync script requires **Read/Write** access to perform these operations:
+     - `GET /api/{app_id}/subnets/{subnet_id}/addresses/` - read existing addresses
+     - `POST /api/{app_id}/addresses/` - create new address records
+     - `PUT /api/{app_id}/addresses/{id}/` - update existing records
+
+> **Note**: The App ID and App code can be reused from the [phpIPAM Node Configuration](#phpipam-node-configuration) section if you've already created one, or you can create a dedicated API application specifically for the sync script.
 
 ### Configuration
 
-The script expects the following environment variables (or a configuration file):
+The script expects the following environment variables:
 
-| Variable | Description |
-|----------|-------------|
-| `OPNSENSE_HOST` | Hostname / IP of the OPNsense firewall |
-| `OPNSENSE_KEY` | OPNsense API key |
-| `OPNSENSE_SECRET` | OPNsense API secret |
-| `OPNSENSE_VERIFY_SSL` | Verify OPNsense TLS certificate (`true` / `false` / path to CA bundle). Default: `true` |
-| `PHPIPAM_HOST` | Hostname / IP of the phpIPAM instance |
-| `PHPIPAM_SCHEME` | Protocol for phpIPAM (`https` or `http`). Default: `https` |
-| `PHPIPAM_APP_ID` | phpIPAM API App ID |
-| `PHPIPAM_APP_CODE` | phpIPAM API App code (token) |
-| `PHPIPAM_SUBNET_ID` | phpIPAM subnet ID to synchronise hosts into |
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `OPNSENSE_HOST` | Hostname / IP of the OPNsense firewall | Yes | - |
+| `OPNSENSE_KEY` | OPNsense API key | Yes | - |
+| `OPNSENSE_SECRET` | OPNsense API secret | Yes | - |
+| `OPNSENSE_VERIFY_SSL` | Verify OPNsense TLS certificate (`true` / `false` / path to CA bundle) | No | `true` |
+| `PHPIPAM_HOST` | Hostname / IP of the phpIPAM instance | Yes | - |
+| `PHPIPAM_SCHEME` | Protocol for phpIPAM (`https` or `http`) | No | `https` |
+| `PHPIPAM_APP_ID` | phpIPAM API App ID | Yes | - |
+| `PHPIPAM_APP_CODE` | phpIPAM API App code (token) | Yes | - |
+| `PHPIPAM_SUBNET_ID` | phpIPAM subnet ID to synchronise hosts into | Yes | - |
+
+You can configure these variables in the `.env` file alongside the database credentials. The `.env_sample` file includes templates for all required variables.
 
 ### Sync logic (pseudo-code)
 
@@ -322,7 +378,13 @@ The script expects the following environment variables (or a configuration file)
 ### Running the sync
 
 ```bash
-# One-shot sync
+# Using the .env file (recommended)
+set -a
+source .env
+set +a
+python3 opnsense_phpipam_sync.py
+
+# Or with inline environment variables
 OPNSENSE_HOST=192.168.1.1 \
 OPNSENSE_KEY=<key> \
 OPNSENSE_SECRET=<secret> \
@@ -333,7 +395,7 @@ PHPIPAM_SUBNET_ID=3 \
 python3 opnsense_phpipam_sync.py
 
 # Schedule via cron (every 5 minutes)
-*/5 * * * * /usr/bin/env bash -c 'source /etc/phpipam-sync.env && python3 /opt/phpipam/opnsense_phpipam_sync.py' >> /var/log/phpipam-sync.log 2>&1
+*/5 * * * * /usr/bin/env bash -c 'cd /path/to/phpipam_config && set -a && source .env && set +a && python3 opnsense_phpipam_sync.py' >> /var/log/phpipam-sync.log 2>&1
 ```
 
 ### phpIPAM API endpoints used
