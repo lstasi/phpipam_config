@@ -184,7 +184,7 @@ cp .env_sample .env
 docker compose up -d
 ```
 
-phpIPAM is then available at `http://<host-ip>/`.  
+phpIPAM is then available at `http://<host-ip>/`.
 Follow the web installer to complete the initial database setup.
 
 ### Notable Features
