@@ -1,0 +1,116 @@
+services:
+  phpipam-web:
+    image: phpipam/phpipam-www:latest
+    container_name: phpipam-web
+    ports:
+      - "80:80"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - TZ=Europe/London
+      - IPAM_DATABASE_HOST=phpipam-db
+      - IPAM_DATABASE_PORT=3306
+      - IPAM_DATABASE_NAME=phpipam
+      - IPAM_DATABASE_USER=phpipam
+      - IPAM_DATABASE_PASS=${DB_PASSWORD}
+    volumes:
+      - phpipam-logo:/phpipam/css/images/logo
+      - phpipam-ca:/usr/local/share/ca-certificates
+    depends_on:
+      phpipam-db:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - phpipam-net
+
+  phpipam-cron:
+    image: phpipam/phpipam-cron:latest
+    container_name: phpipam-cron
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - TZ=Europe/London
+      - IPAM_DATABASE_HOST=phpipam-db
+      - IPAM_DATABASE_PORT=3306
+      - IPAM_DATABASE_NAME=phpipam
+      - IPAM_DATABASE_USER=phpipam
+      - IPAM_DATABASE_PASS=${DB_PASSWORD}
+      - SCAN_INTERVAL=1h
+    volumes:
+      - phpipam-ca:/usr/local/share/ca-certificates
+    depends_on:
+      phpipam-db:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - phpipam-net
+
+  phpipam-db:
+    image: mariadb:latest
+    container_name: phpipam-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=phpipam
+      - MYSQL_USER=phpipam
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - phpipam-db:/var/lib/mysql
+      - phpipam-logs:/var/log/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - phpipam-net
+
+  logrotate:
+    image: blacklabelops/logrotate:latest
+    container_name: phpipam-logrotate
+    environment:
+      - TZ=Europe/London
+      - LOGS_DIRECTORIES=/var/log/mysql
+      - LOGROTATE_SIZE=10M
+      - LOGROTATE_ROTATE=5
+      - LOGROTATE_COMPRESSION=compress
+      - LOGROTATE_INTERVAL=daily
+      - LOGROTATE_DATEFORMAT=-%Y%m%d
+    volumes:
+      - phpipam-logs:/var/log/mysql
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - phpipam-net
+
+volumes:
+  phpipam-db:
+  phpipam-logo:
+  phpipam-ca:
+  phpipam-logs:
+
+networks:
+  phpipam-net:
+    driver: bridge

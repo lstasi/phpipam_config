@@ -39,78 +39,144 @@ A collection of configuration resources for deploying [phpIPAM](https://phpipam.
 
 ## Docker Compose
 
-The following `docker-compose.yml` deploys phpIPAM together with a MariaDB database backend and the optional phpIPAM scan agent.
+The following `docker-compose.yml` (or `dockercompose.yaml`) deploys phpIPAM together with a MariaDB database backend, the phpIPAM scan agent, and a log rotation service for database logs.
 
 ```yaml
-version: "3.9"
-
 services:
-
-  phpipam-db:
-    image: mariadb:10.11
-    container_name: phpipam-db
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD}"
-      MYSQL_DATABASE: phpipam
-      MYSQL_USER: phpipam
-      MYSQL_PASSWORD: "${DB_PASSWORD}"
-    volumes:
-      - phpipam-db:/var/lib/mysql
-    networks:
-      - phpipam
-
   phpipam-web:
     image: phpipam/phpipam-www:latest
     container_name: phpipam-web
-    restart: unless-stopped
-    depends_on:
-      - phpipam-db
-    environment:
-      TZ: "Europe/Amsterdam"
-      IPAM_DATABASE_HOST: phpipam-db
-      IPAM_DATABASE_USER: phpipam
-      IPAM_DATABASE_PASS: "${DB_PASSWORD}"
-      IPAM_DATABASE_NAME: phpipam
     ports:
       - "80:80"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - TZ=Europe/London
+      - IPAM_DATABASE_HOST=phpipam-db
+      - IPAM_DATABASE_PORT=3306
+      - IPAM_DATABASE_NAME=phpipam
+      - IPAM_DATABASE_USER=phpipam
+      - IPAM_DATABASE_PASS=${DB_PASSWORD}
+    volumes:
+      - phpipam-logo:/phpipam/css/images/logo
+      - phpipam-ca:/usr/local/share/ca-certificates
+    depends_on:
+      phpipam-db:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks:
-      - phpipam
+      - phpipam-net
 
   phpipam-cron:
     image: phpipam/phpipam-cron:latest
     container_name: phpipam-cron
-    restart: unless-stopped
-    depends_on:
-      - phpipam-db
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
     environment:
-      TZ: "Europe/Amsterdam"
-      IPAM_DATABASE_HOST: phpipam-db
-      IPAM_DATABASE_USER: phpipam
-      IPAM_DATABASE_PASS: "${DB_PASSWORD}"
-      IPAM_DATABASE_NAME: phpipam
-      SCAN_INTERVAL: "1h"
+      - TZ=Europe/London
+      - IPAM_DATABASE_HOST=phpipam-db
+      - IPAM_DATABASE_PORT=3306
+      - IPAM_DATABASE_NAME=phpipam
+      - IPAM_DATABASE_USER=phpipam
+      - IPAM_DATABASE_PASS=${DB_PASSWORD}
+      - SCAN_INTERVAL=1h
+    volumes:
+      - phpipam-ca:/usr/local/share/ca-certificates
+    depends_on:
+      phpipam-db:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks:
-      - phpipam
+      - phpipam-net
+
+  phpipam-db:
+    image: mariadb:latest
+    container_name: phpipam-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=phpipam
+      - MYSQL_USER=phpipam
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - phpipam-db:/var/lib/mysql
+      - phpipam-logs:/var/log/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - phpipam-net
+
+  logrotate:
+    image: blacklabelops/logrotate:latest
+    container_name: phpipam-logrotate
+    environment:
+      - TZ=Europe/London
+      - LOGS_DIRECTORIES=/var/log/mysql
+      - LOGROTATE_SIZE=10M
+      - LOGROTATE_ROTATE=5
+      - LOGROTATE_COMPRESSION=compress
+      - LOGROTATE_INTERVAL=daily
+      - LOGROTATE_DATEFORMAT=-%Y%m%d
+    volumes:
+      - phpipam-logs:/var/log/mysql
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - phpipam-net
 
 volumes:
   phpipam-db:
+  phpipam-logo:
+  phpipam-ca:
+  phpipam-logs:
 
 networks:
-  phpipam:
+  phpipam-net:
     driver: bridge
 ```
 
 ### Environment variables
 
-Create a `.env` file next to `docker-compose.yml`:
+Create a `.env` file next to `dockercompose.yaml`:
 
 ```dotenv
-DB_ROOT_PASSWORD=changeme_root
-DB_PASSWORD=changeme_phpipam
+DB_ROOT_PASSWORD=your_root_password_here
+DB_PASSWORD=your_phpipam_password_here
 ```
 
-> **Security note:** Never commit the `.env` file to version control. Add it to `.gitignore`.
+Alternatively, copy the provided `.env_sample` file:
+
+```bash
+cp .env_sample .env
+# Edit .env and set your passwords
+```
+
+> **Security note:** Never commit the `.env` file to version control. It is already included in `.gitignore`.
 
 ### Start the stack
 
@@ -120,6 +186,14 @@ docker compose up -d
 
 phpIPAM is then available at `http://<host-ip>/`.  
 Follow the web installer to complete the initial database setup.
+
+### Notable Features
+
+- **Health Checks**: The database service includes a health check to ensure it's ready before dependent services start
+- **Network Capabilities**: `NET_RAW` and `NET_ADMIN` capabilities are added to enable network scanning features
+- **Log Management**: Integrated log rotation service to manage database logs automatically
+- **Persistent Volumes**: Separate volumes for database data, logs, custom logos, and CA certificates
+- **Resource Limits**: JSON logging configured with size and rotation limits to prevent disk space issues
 
 ---
 
